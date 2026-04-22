@@ -9,16 +9,17 @@ import sys
 from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import OllamaEmbeddings
 
-
+# ── Configurações ──────────────────────────────────────────────
 PDF_PATH    = Path(__file__).parent.parent / "data" / "Carda TC 15_2017_Informação.pdf"
 CHROMA_DIR  = Path(__file__).parent / "chroma_db"
 EMBED_MODEL = "nomic-embed-text"   # modelo leve de embeddings do Ollama
 CHUNK_SIZE  = 600
 CHUNK_OVERLAP = 80
+# ──────────────────────────────────────────────────────────────
 
 def main():
     if not PDF_PATH.exists():

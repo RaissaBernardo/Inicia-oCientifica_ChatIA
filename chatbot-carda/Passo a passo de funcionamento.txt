@@ -4,7 +4,6 @@ Chatbot com RAG (Retrieval-Augmented Generation) para responder perguntas técni
 
 ## Estrutura do projeto
 
-```
 chatbot-carda/
 ├── backend/
 │   ├── main.py           ← Servidor FastAPI com RAG
@@ -13,9 +12,7 @@ chatbot-carda/
 ├── frontend/
 │   └── index.html        ← Interface do chatbot
 ├── data/
-   └── Carda TC 15_2017_Informação.pdf  ← COLOQUE O PDF AQUI
-```
-
+   └── Carda TC 15_2017_Informação.pdf   
 
 ## Instalação passo a passo
 
@@ -29,6 +26,7 @@ $env:PATH += ";C:\Users\$env:USERNAME\AppData\Local\Programs\Ollama"
 03- Neste projeto, estamos utilizando o llama3. Portanto, baixe os modelos:
 ollama run llama3
 ollama pull nomic-embed-text
+pip install cryptography
 
 > `llama3` é o modelo de linguagem principal.
 > `nomic-embed-text` é o modelo de embeddings (leve e rápido).
@@ -64,7 +62,6 @@ Acesse http://localhost:8000/
 ###É DE EXTREMA IMPORTÂNCIA QUE O PDF NA PASTA `data/` NÃO TENHA ALTERAÇÃO DE NOME.
 
 O arquivo deve ter exatamente este título:
-```
 data/Carda TC 15_2017_Informação.pdf
 
 

@@ -18,20 +18,19 @@ from pydantic import BaseModel
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.llms import Ollama
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
-
+# ── Configurações ──────────────────────────────────────────────
 CHROMA_DIR   = Path(__file__).parent / "chroma_db"
 EMBED_MODEL  = "nomic-embed-text"
 LLM_MODEL    = "llama3"              # troque por "mistral" se preferir
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 TOP_K        = 5                     # nº de chunks recuperados por consulta
+# ──────────────────────────────────────────────────────────────
 
-
-
-
-
+# ── Prompt personalizado ───────────────────────────────────────
 PROMPT_TEMPLATE = """Você é um assistente técnico especializado na máquina Carda TC 15 (2017).
 Responda em português brasileiro, de forma clara e objetiva.
 Use APENAS as informações fornecidas no contexto abaixo.
@@ -47,10 +46,8 @@ Resposta técnica:"""
 prompt = PromptTemplate(
     input_variables=["context", "question"],
     template=PROMPT_TEMPLATE
-
-
-
-
+)
+# ──────────────────────────────────────────────────────────────
 
 app = FastAPI(title="Chatbot Carda TC 15", version="1.0.0")
 
@@ -61,7 +58,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Carrega RAG na inicialização 
+# ── Carrega RAG na inicialização ───────────────────────────────
 qa_chain = None
 
 @app.on_event("startup")
@@ -94,7 +91,7 @@ async def startup():
     )
     print("[startup] ✅  RAG pronto!")
 
-# Modelos Pydantic 
+# ── Modelos Pydantic ───────────────────────────────────────────
 class ChatRequest(BaseModel):
     question: str
 
@@ -106,10 +103,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[SourceInfo]
 
-
-
-
-# endpoints
+# ── Endpoints ─────────────────────────────────────────────────
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     if not req.question.strip():
@@ -152,7 +146,7 @@ async def health():
     }
 
 
-# frontend
+# ── Serve o frontend ───────────────────────────────────────────
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
