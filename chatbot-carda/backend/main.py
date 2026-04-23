@@ -1,11 +1,10 @@
 """
 main.py - Servidor FastAPI com RAG para o chatbot da Carda TC 15.
-Rodar:  uvicorn main:app --reload  (porta padrão: 8000)
+Rodar:  python -m uvicorn main:app --reload  (porta padrão: 8000)
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import List
 
@@ -15,22 +14,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.llms import Ollama
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_ollama import OllamaEmbeddings, OllamaLLM
+from langchain_chroma import Chroma
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 
 # ── Configurações ──────────────────────────────────────────────
 CHROMA_DIR   = Path(__file__).parent / "chroma_db"
 EMBED_MODEL  = "nomic-embed-text"
-LLM_MODEL    = "llama3"              # troque por "mistral" se preferir
+LLM_MODEL    = "llama3"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
-TOP_K        = 5                     # nº de chunks recuperados por consulta
+TOP_K        = 5
 # ──────────────────────────────────────────────────────────────
 
-# ── Prompt personalizado ───────────────────────────────────────
 PROMPT_TEMPLATE = """Você é um assistente técnico especializado na máquina Carda TC 15 (2017).
 Responda em português brasileiro, de forma clara e objetiva.
 Use APENAS as informações fornecidas no contexto abaixo.
@@ -43,12 +40,6 @@ Pergunta do operador: {question}
 
 Resposta técnica:"""
 
-prompt = PromptTemplate(
-    input_variables=["context", "question"],
-    template=PROMPT_TEMPLATE
-)
-# ──────────────────────────────────────────────────────────────
-
 app = FastAPI(title="Chatbot Carda TC 15", version="1.0.0")
 
 app.add_middleware(
@@ -58,12 +49,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Carrega RAG na inicialização ───────────────────────────────
-qa_chain = None
+rag_chain = None
+retriever = None
 
 @app.on_event("startup")
 async def startup():
-    global qa_chain
+    global rag_chain, retriever
+
     if not CHROMA_DIR.exists():
         print("[AVISO] Banco vetorial não encontrado. Rode 'python ingest.py' primeiro.")
         return
@@ -74,24 +66,25 @@ async def startup():
         persist_directory=str(CHROMA_DIR),
         embedding_function=embeddings
     )
+    retriever = db.as_retriever(search_kwargs={"k": TOP_K})
 
     print("[startup] Conectando ao Ollama LLM...")
-    llm = Ollama(
-        model=LLM_MODEL,
-        temperature=0.1,          # respostas mais determinísticas
-        num_predict=512
+    llm = OllamaLLM(model=LLM_MODEL, temperature=0.1, num_predict=512)
+
+    prompt = PromptTemplate.from_template(PROMPT_TEMPLATE)
+
+    def format_docs(docs):
+        return "\n\n".join(d.page_content for d in docs)
+
+    rag_chain = (
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
     )
 
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=db.as_retriever(search_kwargs={"k": TOP_K}),
-        chain_type_kwargs={"prompt": prompt},
-        return_source_documents=True
-    )
     print("[startup] ✅  RAG pronto!")
 
-# ── Modelos Pydantic ───────────────────────────────────────────
 class ChatRequest(BaseModel):
     question: str
 
@@ -103,50 +96,43 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[SourceInfo]
 
-# ── Endpoints ─────────────────────────────────────────────────
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Pergunta vazia.")
 
-    if qa_chain is None:
+    if rag_chain is None:
         raise HTTPException(
             status_code=503,
             detail="Sistema RAG não inicializado. Rode 'python ingest.py' e reinicie o servidor."
         )
 
-    result  = qa_chain({"query": req.question})
-    answer  = result["result"].strip()
-    sources = []
+    answer = rag_chain.invoke(req.question)
 
-    for doc in result.get("source_documents", []):
-        sources.append(SourceInfo(
-            page   = doc.metadata.get("page", 0) + 1,
-            snippet= doc.page_content[:180].replace("\n", " ") + "..."
-        ))
+    docs = retriever.invoke(req.question)
+    seen, sources = set(), []
+    for doc in docs:
+        page = doc.metadata.get("page", 0) + 1
+        if page not in seen:
+            seen.add(page)
+            sources.append(SourceInfo(
+                page=page,
+                snippet=doc.page_content[:180].replace("\n", " ") + "..."
+            ))
 
-    # Remove fontes duplicadas (mesma página)
-    seen   = set()
-    unique = []
-    for s in sources:
-        if s.page not in seen:
-            seen.add(s.page)
-            unique.append(s)
-
-    return ChatResponse(answer=answer, sources=unique[:3])
+    return ChatResponse(answer=answer.strip(), sources=sources[:3])
 
 
 @app.get("/health")
 async def health():
     return {
         "status"     : "ok",
-        "rag_ready"  : qa_chain is not None,
+        "rag_ready"  : rag_chain is not None,
         "llm_model"  : LLM_MODEL,
         "embed_model": EMBED_MODEL,
     }
 
 
-# ── Serve o frontend ───────────────────────────────────────────
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
