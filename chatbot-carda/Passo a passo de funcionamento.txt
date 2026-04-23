@@ -50,7 +50,7 @@ python ingest.py
 
 06- Inicie o servidor
 cd backend
-uvicorn main:app --reload
+python -m uvicorn main:app --reload
 
 O servidor sobe em: **http://localhost:8000**
 
