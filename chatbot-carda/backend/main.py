@@ -123,6 +123,39 @@ async def chat(req: ChatRequest):
     return ChatResponse(answer=answer.strip(), sources=sources[:3])
 
 
+
+class ReloadRequest(BaseModel):
+    chroma_dir: str
+
+@app.post("/reload_db")
+async def reload_db(req: ReloadRequest):
+    """Troca o banco ChromaDB em uso sem reiniciar o servidor."""
+    global rag_chain, retriever
+
+    target = Path(__file__).parent / req.chroma_dir
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"Pasta nao encontrada: {target}")
+
+    print(f"[reload_db] Trocando para: {target}")
+    embeddings = OllamaEmbeddings(model=EMBED_MODEL)
+    db = Chroma(persist_directory=str(target), embedding_function=embeddings)
+    retriever = db.as_retriever(search_kwargs={"k": TOP_K})
+
+    llm = OllamaLLM(model=LLM_MODEL, temperature=0.1, num_predict=512)
+    prompt = PromptTemplate.from_template(PROMPT_TEMPLATE)
+
+    def format_docs(docs):
+        return "\n\n".join(d.page_content for d in docs)
+
+    rag_chain = (
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+    print("[reload_db] ✅ Banco trocado com sucesso!")
+    return {"status": "ok", "chroma_dir": str(target)}
+
 @app.get("/health")
 async def health():
     return {

@@ -163,23 +163,39 @@ def calcular_faithfulness(resposta: str, ground_truth: str) -> tuple[float, list
     return score, detalhes
 
 
-def regerar_banco(chunk_size: int, chunk_overlap: int):
-    """Roda o ingest.py com os novos parâmetros para recriar o ChromaDB."""
-    print(f"\n  ⚙️  Regerando banco vetorial  (chunk_size={chunk_size}, chunk_overlap={chunk_overlap})...")
+def regerar_banco(chunk_size: int, chunk_overlap: int, nome_caso: str):
+    """
+    Gera o banco vetorial numa pasta separada por caso
+    e pede ao servidor para trocar via /reload_db.
+    Assim o servidor continua rodando normalmente.
+    """
+    pasta = f"chroma_db_caso_{nome_caso}"
+    print(f"\n  ⚙️  Gerando banco na pasta '{pasta}'...")
     print("      Isso pode levar alguns minutos...")
     result = subprocess.run(
         [sys.executable, str(INGEST_SCRIPT),
-         "--chunk_size", str(chunk_size),
-         "--chunk_overlap", str(chunk_overlap)],
+         "--chunk_size",    str(chunk_size),
+         "--chunk_overlap", str(chunk_overlap),
+         "--output",        pasta],
         capture_output=True, text=True
     )
     if result.returncode != 0:
         print(f"[ERRO] ingest.py falhou:\n{result.stderr}")
         sys.exit(1)
-    print("  ✅ Banco regerado com sucesso!")
-    # Dá um tempo pro servidor recarregar o banco (--reload do uvicorn)
-    print("  ⏳ Aguardando servidor recarregar (15s)...")
-    time.sleep(15)
+    print("  ✅ Banco gerado com sucesso!")
+
+    print("  🔄 Avisando o servidor para usar o novo banco...")
+    try:
+        r = httpx.post(
+            CHAT_URL.replace("/chat", "/reload_db"),
+            json={"chroma_dir": pasta},
+            timeout=30
+        )
+        r.raise_for_status()
+        print("  ✅ Servidor trocou de banco!")
+    except Exception as e:
+        print(f"  ⚠️  /reload_db nao respondeu ({e}). Aguardando 10s...")
+        time.sleep(10)
 
 
 def avaliar_caso(caso: dict, dataset: list[dict]) -> list[dict]:
@@ -188,7 +204,7 @@ def avaliar_caso(caso: dict, dataset: list[dict]) -> list[dict]:
     print(f"  CASO {caso['nome']}  |  CHUNK_SIZE={caso['chunk_size']}  CHUNK_OVERLAP={caso['chunk_overlap']}")
     print(f"{'='*60}")
 
-    regerar_banco(caso["chunk_size"], caso["chunk_overlap"])
+    regerar_banco(caso["chunk_size"], caso["chunk_overlap"], caso["nome"])
 
     resultados = []
     total = len(dataset)
